@@ -1,4 +1,4 @@
-import os
+os
 import re
 import time
 import threading
@@ -298,11 +298,13 @@ def add_bot_button(message):
     text = (
         "➕ <b>ADD ANTI LINK BOT TO YOUR GROUP</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<blockquote>"
         "1️⃣ Click the button below.\n"
         "2️⃣ Select your group.\n"
         "3️⃣ Add the bot as an administrator.\n"
         "4️⃣ Enable the <b>Delete Messages</b> and "
         "<b>Restrict Members</b> permissions.\n\n"
+        "<blockquote>"
         "✅ Your group will then be protected by the bot."
     )
 
@@ -325,6 +327,7 @@ def how_to_use_button(message):
     text = (
         "❓ <b>HOW TO USE ANTI LINK BOT</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
+        "<blockquote>"
         "➊ Add the bot to your group.\n"
         "➋ Promote the bot to administrator.\n"
         "➌ Enable these permissions:\n"
@@ -334,6 +337,7 @@ def how_to_use_button(message):
         "the bot will try to delete the message.\n"
         "➎ If the message is deleted successfully, "
         "the member will be muted for 2 hours.\n"
+        "<blockquote>"
         "📌 <b>Important:</b> Group administrators "
         "are exempt from link moderation."
     )
