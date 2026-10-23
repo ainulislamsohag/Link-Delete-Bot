@@ -77,7 +77,7 @@ def owner_keyboard():
     keyboard.add(
         InlineKeyboardButton(
             "👑 OWNER",
-            url=f"https://t.me/{OWNER_USERNAME}"
+            url=f"https://t.me/ainulbhai"
         )
     )
     return keyboard
@@ -305,7 +305,6 @@ def start_command(message):
     bot.send_message(
         message.chat.id,
         text,
-        reply_markup=owner_keyboard(),
         disable_web_page_preview=True
     )
 
@@ -362,7 +361,6 @@ def futures_command(message):
     bot.send_message(
         message.chat.id,
         text,
-        reply_markup=owner_keyboard(),
         disable_web_page_preview=True
     )
 
