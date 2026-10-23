@@ -9,7 +9,7 @@ from telebot.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     ReplyKeyboardMarkup,
-    KeyboardButton
+    KeyboardButton,
 )
 
 # ================= CONFIGURATION =================
@@ -31,28 +31,41 @@ bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 processed_messages = set()
 processed_lock = threading.Lock()
 
-# ================= REGEX =================
+
+# ================= LINK DETECTION =================
 
 LINK_PATTERN = re.compile(
-    r"(?i)(https?://\S+|www\.\S+|"
-    r"t\.me/\S+|telegram\.me/\S+|telegram\.dog/\S+|"
-    r"\b[a-z0-9-]+\.(?:com|net|org|info|biz|xyz|site|"
-    r"online|me|io|co|app|dev|bd|in|us|uk|top|click|"
-    r"link|live|store|shop|tech|cloud|pro|gg)\b\S*)"
+    r"(?i)(?:"
+    r"https?://\S+|"
+    r"www\.\S+|"
+    r"t\.me/\S+|"
+    r"telegram\.me/\S+|"
+    r"telegram\.dog/\S+|"
+    r"\b[a-z0-9-]+\.(?:"
+    r"com|net|org|info|biz|xyz|site|online|me|io|co|"
+    r"app|dev|bd|in|us|uk|top|click|link|live|store|"
+    r"shop|tech|cloud|pro|gg|edu|gov|tv|ai|fun|"
+    r"website|space|today|world|digital|services"
+    r")\b\S*"
+    r")"
 )
+
 
 # ================= KEYBOARDS =================
 
 def get_main_keyboard():
     keyboard = ReplyKeyboardMarkup(
         resize_keyboard=True,
-        row_width=2
+        row_width=2,
     )
 
-    keyboard.row(KeyboardButton("➕ Add Bot in group➕"))
+    keyboard.row(
+        KeyboardButton("➕ Add Bot in group➕")
+    )
+
     keyboard.row(
         KeyboardButton("❓ HOW TO USE ❓"),
-        KeyboardButton("📞 Support")
+        KeyboardButton("📞 Support"),
     )
 
     return keyboard
@@ -65,7 +78,7 @@ def get_add_group_keyboard():
     keyboard.add(
         InlineKeyboardButton(
             "➕ ADD BOT TO GROUP ➕",
-            url=f"https://t.me/{bot_username}?startgroup=true"
+            url=f"https://t.me/{bot_username}?startgroup=true",
         )
     )
 
@@ -78,7 +91,7 @@ def get_owner_keyboard():
     keyboard.add(
         InlineKeyboardButton(
             "👑 CONTACT OWNER 👑",
-            url=OWNER_URL
+            url=OWNER_URL,
         )
     )
 
@@ -91,7 +104,7 @@ def get_unmute_keyboard(chat_id, user_id):
     keyboard.add(
         InlineKeyboardButton(
             "🔓 UNMUTE MEMBER",
-            callback_data=f"unmute:{chat_id}:{user_id}"
+            callback_data=f"unmute:{chat_id}:{user_id}",
         )
     )
 
@@ -113,8 +126,12 @@ def is_human_admin(chat_id, user_id):
     try:
         member = bot.get_chat_member(chat_id, user_id)
         return member.status in ("administrator", "creator")
+
     except Exception as error:
-        print(f"Admin check error: {error}")
+        print(
+            f"ADMIN CHECK FAILED | Chat: {chat_id} | "
+            f"User: {user_id} | Error: {error}"
+        )
         return False
 
 
@@ -124,11 +141,10 @@ def contains_link(message):
     if LINK_PATTERN.search(text):
         return True
 
-    entities = (
-        message.entities or []
-        if message.text is not None
-        else message.caption_entities or []
-    )
+    if message.text is not None:
+        entities = message.entities or []
+    else:
+        entities = message.caption_entities or []
 
     for entity in entities:
         if entity.type in ("url", "text_link"):
@@ -138,6 +154,7 @@ def contains_link(message):
             mention = text[
                 entity.offset:entity.offset + entity.length
             ]
+
             if mention.startswith("@"):
                 return True
 
@@ -146,16 +163,16 @@ def contains_link(message):
 
 def extract_link(message):
     text = message.text or message.caption or ""
+
     match = LINK_PATTERN.search(text)
 
     if match:
         return match.group(0)
 
-    entities = (
-        message.entities or []
-        if message.text is not None
-        else message.caption_entities or []
-    )
+    if message.text is not None:
+        entities = message.entities or []
+    else:
+        entities = message.caption_entities or []
 
     for entity in entities:
         if entity.type == "text_link" and entity.url:
@@ -170,6 +187,7 @@ def extract_link(message):
             mention = text[
                 entity.offset:entity.offset + entity.length
             ]
+
             if mention.startswith("@"):
                 return mention
 
@@ -182,19 +200,52 @@ def delete_message_later(chat_id, message_id, delay):
 
         try:
             bot.delete_message(chat_id, message_id)
+
         except Exception as error:
-            print(f"Scheduled deletion failed: {error}")
+            print(
+                f"SCHEDULED DELETE FAILED | Chat: {chat_id} | "
+                f"Message: {message_id} | Error: {error}"
+            )
 
     threading.Thread(target=task, daemon=True).start()
 
 
+# ================= MUTE MEMBER =================
+
 def mute_member(chat_id, user_id):
     try:
+        # Verify the bot's administrator status and permissions.
+        bot_id = bot.get_me().id
+        bot_member = bot.get_chat_member(chat_id, bot_id)
+
+        if bot_member.status != "administrator":
+            print("MUTE FAILED: Bot is not a group administrator.")
+            return False
+
+        if not getattr(
+            bot_member, "can_restrict_members", False
+        ):
+            print(
+                "MUTE FAILED: Enable 'Restrict Members' permission "
+                "for the bot in group administrator settings."
+            )
+            return False
+
+        # Never try to mute group administrators or the owner.
+        target = bot.get_chat_member(chat_id, user_id)
+
+        if target.status in ("administrator", "creator"):
+            print(
+                f"MUTE SKIPPED: User {user_id} is an administrator "
+                "or group owner."
+            )
+            return False
+
         until_date = int(time.time()) + MUTE_DURATION
 
         bot.restrict_chat_member(
-            chat_id,
-            user_id,
+            chat_id=chat_id,
+            user_id=user_id,
             until_date=until_date,
             permissions={
                 "can_send_messages": False,
@@ -206,25 +257,39 @@ def mute_member(chat_id, user_id):
                 "can_send_voice_notes": False,
                 "can_send_polls": False,
                 "can_send_other_messages": False,
-                "can_add_web_page_previews": False
-            }
+                "can_add_web_page_previews": False,
+            },
+            use_independent_chat_permissions=True,
+        )
+
+        print(
+            f"MUTE SUCCESS | Chat: {chat_id} | "
+            f"User: {user_id} | Duration: 2 hours"
         )
 
         return True
 
     except Exception as error:
-        print(f"Mute failed: {error}")
+        print(
+            f"MUTE FAILED | Chat: {chat_id} | "
+            f"User: {user_id} | Error: {error}"
+        )
         return False
 
+
+# ================= ADMIN REPORT =================
 
 def send_admin_report(chat_id, user, link, deleted, muted):
     try:
         chat = bot.get_chat(chat_id)
+
         group_title = html.escape(chat.title or "Unknown Group")
         safe_name = html.escape(get_display_name(user))
+
         safe_username = html.escape(
             f"@{user.username}" if user.username else "Not Set"
         )
+
         safe_link = html.escape(link)
 
         report = (
@@ -240,7 +305,7 @@ def send_admin_report(chat_id, user, link, deleted, muted):
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🗑️ <b>Message Deleted:</b> "
             f"{'✅ YES' if deleted else '❌ NO'}\n"
-            f"🔇 <b>Member Muted:</b> "
+            f"🔇 <b>Muted for 2 hours:</b> "
             f"{'✅ SUCCESS' if muted else '❌ FAILED'}\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
@@ -248,16 +313,19 @@ def send_admin_report(chat_id, user, link, deleted, muted):
         bot.send_message(
             OWNER_USERNAME,
             report,
-            reply_markup=get_unmute_keyboard(chat_id, user.id)
+            reply_markup=get_unmute_keyboard(chat_id, user.id),
         )
 
     except Exception as error:
-        print(f"Admin report failed: {error}")
+        print(f"ADMIN REPORT FAILED: {error}")
 
 
 # ================= START COMMAND =================
 
-@bot.message_handler(commands=["start"], chat_types=["private"])
+@bot.message_handler(
+    commands=["start"],
+    chat_types=["private"],
+)
 def start_command(message):
     welcome_text = (
         f"👋 <b>WELCOME TO {BOT_NAME}!</b>\n"
@@ -265,15 +333,15 @@ def start_command(message):
         "🛡️ Your group protection assistant!\n\n"
         "🔗 Automatically detects and removes links "
         "sent by regular members.\n"
-        "🔇 Members whose link messages are deleted "
-        "may be muted for 2 hours.\n\n"
+        "🔇 If a link message is deleted successfully, "
+        "the bot will try to mute the member for 2 hours.\n\n"
         "👇 <b>Choose an option below:</b>"
     )
 
     bot.send_message(
         message.chat.id,
         welcome_text,
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(),
     )
 
 
@@ -301,7 +369,7 @@ def add_bot_button(message):
     bot.send_message(
         message.chat.id,
         text,
-        reply_markup=get_add_group_keyboard()
+        reply_markup=get_add_group_keyboard(),
     )
 
 
@@ -323,19 +391,19 @@ def how_to_use_button(message):
         "➌ Enable these permissions:\n"
         "   • 🗑️ Delete Messages\n"
         "   • 🔇 Restrict Members\n\n"
-        "➍ When a regular member sends a link, "
-        "the bot will try to delete the message.\n"
-        "➎ If the message is deleted successfully, "
-        "the bot will try to mute the member for 2 hours."
+        "➍ The bot will try to delete link messages "
+        "sent by regular members.\n"
+        "➎ If deletion succeeds, it will try to mute "
+        "the member for 2 hours."
         "</blockquote>\n\n"
-        "📌 <b>Important:</b> Group administrators are "
-        "exempt from link moderation."
+        "📌 <b>Important:</b> Group administrators "
+        "are exempt from link moderation."
     )
 
     bot.send_message(
         message.chat.id,
         text,
-        reply_markup=get_owner_keyboard()
+        reply_markup=get_owner_keyboard(),
     )
 
 
@@ -353,26 +421,28 @@ def support_button(message):
         "──────────────────────────\n\n"
         "💠 <b>If You Face Any Problem:</b>\n\n"
         "<blockquote>"
-        "🔴 Don’t worry! Our team is always here to assist you.\n"
-        "🟠 Please contact the owner or support team for instant help.\n"
-        "🟡 Make sure to describe your issue clearly so we can solve it fast."
+        "🔴 Don’t worry! Our team is here to assist you.\n"
+        "🟠 Contact the owner for help.\n"
+        "🟡 Describe your issue clearly so it can be resolved faster."
         "</blockquote>\n\n"
-        "✨ We’ll get back to you as soon as possible. "
-        "Thank you for your patience and trust!\n\n"
+        "✨ Thank you for your patience and trust!\n\n"
         "<b>Contact The Owner Directly -</b>"
     )
 
     bot.send_message(
         message.chat.id,
         support_text,
-        reply_markup=get_owner_keyboard()
+        reply_markup=get_owner_keyboard(),
     )
 
 
 # ================= UNMUTE CALLBACK =================
 
 @bot.callback_query_handler(
-    func=lambda call: call.data and call.data.startswith("unmute:")
+    func=lambda call: (
+        call.data is not None
+        and call.data.startswith("unmute:")
+    )
 )
 def unmute_callback(call):
     try:
@@ -381,20 +451,40 @@ def unmute_callback(call):
         chat_id = int(chat_id)
         user_id = int(user_id)
 
-        if not is_human_admin(
-            call.message.chat.id,
-            call.from_user.id
-        ):
+        # The button is sent privately to the owner.
+        # Check the clicking user's admin status in the target group.
+        if not is_human_admin(chat_id, call.from_user.id):
             bot.answer_callback_query(
                 call.id,
                 "⛔ Only group admins can use this button.",
-                show_alert=True
+                show_alert=True,
             )
             return
 
-        bot.restrict_chat_member(
+        # Verify that the bot can restrict members.
+        bot_member = bot.get_chat_member(
             chat_id,
-            user_id,
+            bot.get_me().id,
+        )
+
+        if (
+            bot_member.status != "administrator"
+            or not getattr(
+                bot_member, "can_restrict_members", False
+            )
+        ):
+            bot.answer_callback_query(
+                call.id,
+                "❌ The bot needs Restrict Members permission.",
+                show_alert=True,
+            )
+            return
+
+        # Restore standard send permissions.
+        # This does not restore any custom permissions set previously.
+        bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=user_id,
             permissions={
                 "can_send_messages": True,
                 "can_send_audios": True,
@@ -405,13 +495,14 @@ def unmute_callback(call):
                 "can_send_voice_notes": True,
                 "can_send_polls": True,
                 "can_send_other_messages": True,
-                "can_add_web_page_previews": True
-            }
+                "can_add_web_page_previews": True,
+            },
+            use_independent_chat_permissions=True,
         )
 
         bot.answer_callback_query(
             call.id,
-            "✅ Member unmuted successfully!"
+            "✅ Member unmuted successfully!",
         )
 
         confirmation = bot.send_message(
@@ -421,23 +512,23 @@ def unmute_callback(call):
             f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
             f"👮 <b>Action by:</b> "
             f"{html.escape(get_display_name(call.from_user))}\n"
-            "━━━━━━━━━━━━━━━━━━━━"
+            "━━━━━━━━━━━━━━━━━━━━",
         )
 
         delete_message_later(
             confirmation.chat.id,
             confirmation.message_id,
-            REPORT_DELETE_DELAY
+            REPORT_DELETE_DELAY,
         )
 
     except Exception as error:
-        print(f"Unmute callback failed: {error}")
+        print(f"UNMUTE FAILED: {error}")
 
         try:
             bot.answer_callback_query(
                 call.id,
-                "❌ Could not unmute this member.",
-                show_alert=True
+                "❌ Could not unmute. Check bot permissions and logs.",
+                show_alert=True,
             )
         except Exception:
             pass
@@ -455,21 +546,30 @@ def unmute_callback(call):
         "audio",
         "voice",
         "video_note",
-        "sticker"
+        "sticker",
     ],
-    func=lambda message: message.chat.type in ("group", "supergroup")
+    func=lambda message: (
+        message.chat.type in ("group", "supergroup")
+    ),
 )
 def anti_link_moderation(message):
     if not message.from_user or message.from_user.is_bot:
         return
 
-    if is_human_admin(message.chat.id, message.from_user.id):
+    # Exempt group administrators and the owner.
+    if is_human_admin(
+        message.chat.id,
+        message.from_user.id,
+    ):
         return
 
     if not contains_link(message):
         return
 
-    message_key = (message.chat.id, message.message_id)
+    message_key = (
+        message.chat.id,
+        message.message_id,
+    )
 
     with processed_lock:
         if message_key in processed_messages:
@@ -481,20 +581,25 @@ def anti_link_moderation(message):
     deleted = False
     muted = False
 
+    # Delete the offending message first.
     try:
         bot.delete_message(
             message.chat.id,
-            message.message_id
+            message.message_id,
         )
         deleted = True
 
     except Exception as error:
-        print(f"Message deletion failed: {error}")
+        print(
+            f"DELETE FAILED | Chat: {message.chat.id} | "
+            f"Message: {message.message_id} | Error: {error}"
+        )
 
+    # Mute only after successful deletion.
     if deleted:
         muted = mute_member(
             message.chat.id,
-            message.from_user.id
+            message.from_user.id,
         )
 
     try:
@@ -513,24 +618,24 @@ def anti_link_moderation(message):
 
         warning = bot.send_message(
             message.chat.id,
-            warning_text
+            warning_text,
         )
 
         delete_message_later(
             warning.chat.id,
             warning.message_id,
-            REPORT_DELETE_DELAY
+            REPORT_DELETE_DELAY,
         )
 
     except Exception as error:
-        print(f"Warning message failed: {error}")
+        print(f"WARNING MESSAGE FAILED: {error}")
 
     send_admin_report(
         message.chat.id,
         message.from_user,
         link,
         deleted,
-        muted
+        muted,
     )
 
 
@@ -541,5 +646,5 @@ print(f"{BOT_NAME} is running...")
 bot.infinity_polling(
     skip_pending=True,
     timeout=30,
-    long_polling_timeout=30
+    long_polling_timeout=30,
 )
