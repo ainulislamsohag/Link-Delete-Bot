@@ -22,8 +22,8 @@ if not BOT_TOKEN:
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
-MUTE_DURATION = 2 * 60 * 60       # 2 hours
-REPORT_DELETE_DELAY = 180         # 3 minutes
+MUTE_DURATION = 2 * 60 * 60
+REPORT_DELETE_DELAY = 180
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +31,42 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+processed_messages = set()
+processed_lock = threading.Lock()
+
+
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+
+def escape_html(value):
+    return html.escape(str(value or "Unknown"))
+
+
+def get_display_name(user):
+    name = " ".join(
+        part
+        for part in [user.first_name, user.last_name]
+        if part
+    )
+    return name or "Unknown"
+
+
+def is_group(chat):
+    return chat.type in ("group", "supergroup")
+
+
+def is_human_admin(chat_id, user_id):
+    try:
+        member = bot.get_chat_member(chat_id, user_id)
+        return member.status in ("administrator", "creator")
+    except Exception as exc:
+        logger.warning(
+            "Could not check administrator status: %s",
+            exc
+        )
+        return False
 
 
 # ==========================================
@@ -54,23 +90,13 @@ LINK_PATTERN = re.compile(
     r")"
 )
 
-processed_messages = set()
-processed_lock = threading.Lock()
 
-
-def escape_html(value):
-    return html.escape(str(value or "Unknown"))
-
-
-def get_display_name(user):
-    name = " ".join(
-        part for part in [user.first_name, user.last_name] if part
-    )
-    return name or "Unknown"
+def get_message_text(message):
+    return message.text or message.caption or ""
 
 
 def contains_link(message):
-    text = message.text or message.caption or ""
+    text = get_message_text(message)
 
     if LINK_PATTERN.search(text):
         return True
@@ -84,27 +110,80 @@ def contains_link(message):
         if entity.type in ("url", "text_link"):
             return True
 
-    if re.search(r"(?i)(?:^|\s)@[a-z][a-z0-9_]{4,}\b", text):
+    if re.search(
+        r"(?i)(?:^|\s)@[a-z][a-z0-9_]{4,}\b",
+        text
+    ):
         return True
 
     return False
 
 
-def is_group(chat):
-    return chat.type in ("group", "supergroup")
+def extract_link(message):
+    text = get_message_text(message)
 
+    entities = (
+        (message.entities or [])
+        + (message.caption_entities or [])
+    )
 
-def is_human_admin(chat_id, user_id):
-    try:
-        member = bot.get_chat_member(chat_id, user_id)
-        return member.status in ("administrator", "creator")
-    except Exception as exc:
-        logger.warning("Could not check admin status: %s", exc)
-        return False
+    for entity in entities:
+        if entity.type == "text_link" and entity.url:
+            return entity.url
+
+        if entity.type == "url":
+            return text[
+                entity.offset:entity.offset + entity.length
+            ]
+
+    match = LINK_PATTERN.search(text)
+
+    if match:
+        return match.group(0)
+
+    username_match = re.search(
+        r"(?i)(?:^|\s)(@[a-z][a-z0-9_]{4,}\b)",
+        text
+    )
+
+    if username_match:
+        return username_match.group(1)
+
+    return "(Link in media caption)"
 
 
 # ==========================================
-# MUTE / UNMUTE HELPERS
+# AUTO-DELETE HELPER
+# ==========================================
+
+def delete_message_later(chat_id, message_id, delay):
+    def worker():
+        time.sleep(delay)
+
+        try:
+            bot.delete_message(chat_id, message_id)
+
+            logger.info(
+                "Deleted message %s from chat %s",
+                message_id,
+                chat_id
+            )
+
+        except Exception as exc:
+            logger.warning(
+                "Could not delete message %s: %s",
+                message_id,
+                exc
+            )
+
+    threading.Thread(
+        target=worker,
+        daemon=True
+    ).start()
+
+
+# ==========================================
+# MUTE AND UNMUTE FUNCTIONS
 # ==========================================
 
 def mute_member(chat_id, user_id, until_date):
@@ -122,16 +201,14 @@ def mute_member(chat_id, user_id, until_date):
     )
 
     bot.restrict_chat_member(
-        chat_id,
-        user_id,
+        chat_id=chat_id,
+        user_id=user_id,
         permissions=permissions,
         until_date=until_date
     )
 
 
 def unmute_member(chat_id, user_id):
-    # This restores common permissions.
-    # Change these settings if your group has custom restrictions.
     permissions = telebot.types.ChatPermissions(
         can_send_messages=True,
         can_send_audios=True,
@@ -146,48 +223,25 @@ def unmute_member(chat_id, user_id):
     )
 
     bot.restrict_chat_member(
-        chat_id,
-        user_id,
+        chat_id=chat_id,
+        user_id=user_id,
         permissions=permissions,
         until_date=0
     )
 
 
 # ==========================================
-# DELETE MESSAGE AFTER A DELAY
-# ==========================================
-
-def delete_message_later(chat_id, message_id, delay):
-    def worker():
-        time.sleep(delay)
-
-        try:
-            bot.delete_message(chat_id, message_id)
-            logger.info(
-                "Deleted report message %s from chat %s",
-                message_id,
-                chat_id
-            )
-        except Exception as exc:
-            logger.warning(
-                "Could not delete report message %s: %s",
-                message_id,
-                exc
-            )
-
-    threading.Thread(target=worker, daemon=True).start()
-
-
-# ==========================================
-# SEND REPORT TO GROUP ADMINS
-# Delete each report after 3 minutes
+# ADMIN REPORTS
 # ==========================================
 
 def send_admin_report(chat_id, report_text, reply_markup=None):
     try:
         administrators = bot.get_chat_administrators(chat_id)
-    except Exception as exc:
-        logger.error("Could not get group admins: %s", exc)
+
+    except Exception:
+        logger.exception(
+            "Could not retrieve group administrators."
+        )
         return
 
     for admin in administrators:
@@ -197,30 +251,23 @@ def send_admin_report(chat_id, report_text, reply_markup=None):
             continue
 
         try:
-            sent = bot.send_message(
-                user.id,
-                report_text,
+            bot.send_message(
+                chat_id=user.id,
+                text=report_text,
                 reply_markup=reply_markup,
                 disable_web_page_preview=True
             )
 
-            # Delete this admin's report after 180 seconds.
-            delete_message_later(
-                sent.chat.id,
-                sent.message_id,
-                REPORT_DELETE_DELAY
-            )
-
         except Exception as exc:
-            logger.info(
-                "Could not DM admin %s. They may need to start the bot: %s",
+            logger.warning(
+                "Could not send a private report to admin %s: %s",
                 user.id,
                 exc
             )
 
 
 # ==========================================
-# /START
+# /START COMMAND
 # ==========================================
 
 @bot.message_handler(commands=["start"])
@@ -229,13 +276,14 @@ def start_command(message):
 
     text = (
         "🛡️ <b>ANTI-LINK BOT</b>\n\n"
-        "আমি গ্রুপের লিংক শনাক্ত করে নিয়ম ভঙ্গকারী "
-        "সদস্যকে মিউট করতে সাহায্য করি।\n\n"
-        "➤ আমাকে গ্রুপে অ্যাড করো।\n"
-        "➤ Delete Messages ও Restrict Members পারমিশন দাও।\n"
-        "➤ রিপোর্ট পেতে গ্রুপের অ্যাডমিনরা আমাকে "
-        "ব্যক্তিগত চ্যাটে /start পাঠাবেন।\n\n"
-        f"👤 <b>Name:</b> {escape_html(get_display_name(user))}\n"
+        "I help protect groups by detecting links, "
+        "deleting prohibited messages, and muting members.\n\n"
+        "➤ Add me to your group.\n"
+        "➤ Grant me Delete Messages and Restrict Members permissions.\n"
+        "➤ Group administrators must send me /start privately "
+        "to receive security reports.\n\n"
+        f"👤 <b>Name:</b> "
+        f"{escape_html(get_display_name(user))}\n"
         f"🆔 <b>User ID:</b> <code>{user.id}</code>"
     )
 
@@ -243,24 +291,28 @@ def start_command(message):
 
 
 # ==========================================
-# /ID
+# /ID COMMAND
 # ==========================================
 
 @bot.message_handler(commands=["id"])
 def id_command(message):
     bot.reply_to(
         message,
-        f"🆔 <b>Chat ID:</b> <code>{message.chat.id}</code>\n"
-        f"👤 <b>Your ID:</b> <code>{message.from_user.id}</code>"
+        f"🆔 <b>Chat ID:</b> "
+        f"<code>{message.chat.id}</code>\n"
+        f"👤 <b>Your ID:</b> "
+        f"<code>{message.from_user.id}</code>"
     )
 
 
 # ==========================================
-# INLINE UNMUTE BUTTON
+# UNMUTE BUTTON CALLBACK
 # ==========================================
 
 @bot.callback_query_handler(
-    func=lambda call: call.data and call.data.startswith("unmute:")
+    func=lambda call: (
+        call.data and call.data.startswith("unmute:")
+    )
 )
 def unmute_button_callback(call):
     try:
@@ -277,62 +329,87 @@ def unmute_button_callback(call):
         chat_id = int(parts[1])
         target_user_id = int(parts[2])
 
-        # Only an admin of the original group can unmute.
+        # Only administrators of the original group can unmute.
         if not is_human_admin(chat_id, call.from_user.id):
             bot.answer_callback_query(
                 call.id,
-                "❌ শুধু ওই গ্রুপের অ্যাডমিন আনমিউট করতে পারবেন।",
+                "Only administrators of this group can unmute members.",
                 show_alert=True
             )
             return
 
+        # Unmute the selected member.
         unmute_member(chat_id, target_user_id)
 
         bot.answer_callback_query(
             call.id,
-            "✅ সদস্যকে আনমিউট করা হয়েছে!"
+            "Member successfully unmuted."
         )
 
-        # Remove the button to prevent repeated clicks.
+        # Remove the button after use.
         try:
             bot.edit_message_reply_markup(
-                call.message.chat.id,
-                call.message.message_id,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
                 reply_markup=None
             )
         except Exception:
-            pass
-
-        # Send a separate confirmation.
-        try:
-            confirmation = bot.send_message(
-                call.message.chat.id,
-                "✅ <b>MEMBER UNMUTED</b>\n\n"
-                f"👮 <b>Admin:</b> "
-                f"{escape_html(get_display_name(call.from_user))}\n"
-                f"🆔 <b>Admin ID:</b> "
-                f"<code>{call.from_user.id}</code>\n"
-                f"🆔 <b>Member ID:</b> "
-                f"<code>{target_user_id}</code>"
+            logger.warning(
+                "Could not remove the unmute button."
             )
 
-            # Delete the confirmation after 3 minutes.
+        # Retrieve the target member's current display name.
+        try:
+            target_member = bot.get_chat_member(
+                chat_id,
+                target_user_id
+            )
+
+            target_name = escape_html(
+                get_display_name(target_member.user)
+            )
+
+        except Exception:
+            target_name = "Unknown"
+
+        # Send the requested confirmation message.
+        confirmation_text = (
+            "✅ <b>MEMBER UNMUTED</b>\n\n"
+            f"👮 <b>Administrator:</b> "
+            f"{escape_html(get_display_name(call.from_user))}\n"
+            f"👤 <b>User:</b> {target_name}\n"
+            f"🆔 <b>Member ID:</b> "
+            f"<code>{target_user_id}</code>"
+        )
+
+        try:
+            confirmation = bot.send_message(
+                chat_id=call.message.chat.id,
+                text=confirmation_text
+            )
+
+            # Delete confirmation after three minutes.
             delete_message_later(
                 confirmation.chat.id,
                 confirmation.message_id,
                 REPORT_DELETE_DELAY
             )
 
-        except Exception as exc:
-            logger.warning("Could not send confirmation: %s", exc)
+        except Exception:
+            logger.exception(
+                "Could not send unmute confirmation."
+            )
 
     except Exception:
-        logger.exception("Unmute button failed")
+        logger.exception(
+            "Unmute button operation failed."
+        )
 
         try:
             bot.answer_callback_query(
                 call.id,
-                "❌ আনমিউট করা যায়নি। বটের পারমিশন পরীক্ষা করো।",
+                "Failed to unmute the member. "
+                "Check the bot's permissions.",
                 show_alert=True
             )
         except Exception:
@@ -365,6 +442,7 @@ def moderate_message(message):
     if not is_group(chat):
         return
 
+    # Ignore bots and messages without a sender.
     if not user or user.is_bot:
         return
 
@@ -379,88 +457,133 @@ def moderate_message(message):
 
         if len(processed_messages) > 5000:
             processed_messages.clear()
+            processed_messages.add(key)
 
-    # Do not moderate human administrators.
+    # Do not moderate group administrators.
     if is_human_admin(chat.id, user.id):
         return
 
-    # Ignore messages without detected links.
+    # Ignore messages without links.
     if not contains_link(message):
         return
 
-    # Delete the offending message.
-    try:
-        bot.delete_message(chat.id, message.message_id)
-    except Exception as exc:
-        logger.warning("Could not delete offending message: %s", exc)
+    link = extract_link(message)
 
-    # Mute for two hours.
-    mute_until = int(time.time()) + MUTE_DURATION
-    mute_success = False
+    # Attempt to delete the original message.
+    delete_success = False
 
     try:
-        mute_member(chat.id, user.id, mute_until)
-        mute_success = True
-    except Exception as exc:
-        logger.error("Could not mute member: %s", exc)
+        bot.delete_message(
+            chat.id,
+            message.message_id
+        )
+        delete_success = True
 
-    # Add the unmute button only if muting succeeded.
-    keyboard = InlineKeyboardMarkup()
-
-    if mute_success:
-        keyboard.add(
-            InlineKeyboardButton(
-                "🔓 UNMUTE MEMBER",
-                callback_data=f"unmute:{chat.id}:{user.id}"
-            )
+    except Exception:
+        logger.exception(
+            "Could not delete the offending message."
         )
 
+    # Mute the member only if deletion succeeded.
+    mute_success = False
+
+    if delete_success:
+        try:
+            mute_member(
+                chat.id,
+                user.id,
+                int(time.time()) + MUTE_DURATION
+            )
+            mute_success = True
+
+        except Exception:
+            logger.exception(
+                "Could not mute the member."
+            )
+
+    # Send group warning.
+    member_name = escape_html(
+        get_display_name(user)
+    )
+
+    warning_text = (
+        "🛡️ <b>ANTI-LINK SECURITY</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{member_name}, your message was deleted,\n"
+        "links are not allowed in this group.\n"
+        "━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    try:
+        warning = bot.send_message(
+            chat.id,
+            warning_text,
+            disable_web_page_preview=True
+        )
+
+        delete_message_later(
+            warning.chat.id,
+            warning.message_id,
+            REPORT_DELETE_DELAY
+        )
+
+    except Exception:
+        logger.exception(
+            "Could not send the group warning."
+        )
+
+    # Prepare administrator report.
     username = (
         f"@{escape_html(user.username)}"
         if user.username
         else "Not Set"
     )
 
-    group_title = escape_html(chat.title or "Unknown Group")
-    member_name = escape_html(get_display_name(user))
-
-    status = (
-        "✅ Muted for 2 hours"
-        if mute_success
-        else "❌ Mute failed — check bot permissions"
+    group_title = escape_html(
+        chat.title or "Unknown Group"
     )
 
-    original_text = message.text or message.caption or "[Media message]"
-
-    if len(original_text) > 700:
-        original_text = original_text[:700] + "..."
-
     report = (
-        "🚨 <b>ANTI-LINK VIOLATION</b> 🚨\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 <b>Group:</b> {group_title}\n"
-        f"🆔 <b>Group ID:</b> <code>{chat.id}</code>\n"
+        "🛡️ <b>ANTI-LINK SECURITY REPORT</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 <b>Name:</b> {member_name}\n"
         f"🔗 <b>Username:</b> {username}\n"
         f"🆔 <b>User ID:</b> <code>{user.id}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔗 <b>Message:</b> {escape_html(original_text)}\n"
-        f"🛡️ <b>Status:</b> {status}\n"
-        "⏳ <b>Mute Duration:</b> 2 hours\n"
-        "🗑️ <b>Report deletion:</b> After 3 minutes\n"
+        f"👥 <b>Group:</b> {group_title}\n"
+        f"🆔 <b>Group ID:</b> <code>{chat.id}</code>\n"
+        f"🔗 <b>Link:</b> {escape_html(link)}\n"
+        f"🗑️ <b>Message Deleted:</b> "
+        f"{'YES' if delete_success else 'NO'}\n"
+        f"🔇 <b>2-Hour Mute:</b> "
+        f"{'SUCCESS' if mute_success else 'FAILED'}\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
 
+    # Add an unmute button if the member was muted.
+    keyboard = None
+
+    if mute_success:
+        keyboard = InlineKeyboardMarkup()
+
+        keyboard.add(
+            InlineKeyboardButton(
+                "🔓 UNMUTE MEMBER",
+                callback_data=(
+                    f"unmute:{chat.id}:{user.id}"
+                )
+            )
+        )
+
+    # Send private reports to human administrators.
     send_admin_report(
         chat.id,
         report,
-        reply_markup=keyboard if mute_success else None
+        reply_markup=keyboard
     )
 
 
 # ==========================================
-# START BOT
+# START THE BOT
 # ==========================================
 
 if __name__ == "__main__":
@@ -473,12 +596,17 @@ if __name__ == "__main__":
             skip_pending=True,
             timeout=30,
             long_polling_timeout=30,
-            allowed_updates=["message", "callback_query"]
+            allowed_updates=[
+                "message",
+                "callback_query"
+            ]
         )
 
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user.")
+        logger.info("Bot stopped by the user.")
 
     except Exception:
-        logger.exception("Bot stopped unexpectedly.")
-        raise
+        logger.exception(
+            "The bot stopped unexpectedly."
+        )
+        raiseraise
