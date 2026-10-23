@@ -324,7 +324,7 @@ def add_bot_button(message):
 def how_to_use_button(message):
     text = (
         "❓ <b>HOW TO USE ANTI LINK BOT</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
         "➊ Add the bot to your group.\n"
         "➋ Promote the bot to administrator.\n"
         "➌ Enable these permissions:\n"
@@ -335,15 +335,12 @@ def how_to_use_button(message):
         "➎ If the message is deleted successfully, "
         "the member will be muted for 2 hours.\n"
         "📌 <b>Important:</b> Group administrators "
-        "are exempt from link moderation.\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 Need more help? Contact the owner below."
+        "are exempt from link moderation."
     )
 
     bot.send_message(
         message.chat.id,
-        text,
-        reply_markup=get_owner_keyboard()
+        text
     )
 
 
