@@ -60,10 +60,15 @@ def is_group(chat):
     return chat.type in ("group", "supergroup")
 
 
+def is_private(message):
+    return message.chat.type == "private"
+
+
 def is_human_admin(chat_id, user_id):
     try:
         member = bot.get_chat_member(chat_id, user_id)
         return member.status in ("administrator", "creator")
+
     except Exception as exc:
         logger.warning(
             "Could not check administrator status: %s",
@@ -74,12 +79,14 @@ def is_human_admin(chat_id, user_id):
 
 def owner_keyboard():
     keyboard = InlineKeyboardMarkup()
+
     keyboard.add(
         InlineKeyboardButton(
             "👑 OWNER",
-            url=f"https://t.me/ainulbhai"
+            url=f"https://t.me/{OWNER_USERNAME}"
         )
     )
+
     return keyboard
 
 
@@ -246,7 +253,6 @@ def unmute_member(chat_id, user_id):
 
 # ==========================================
 # ADMIN REPORTS
-# Private reports are not auto-deleted.
 # ==========================================
 
 def send_admin_report(chat_id, report_text, reply_markup=None):
@@ -282,10 +288,13 @@ def send_admin_report(chat_id, report_text, reply_markup=None):
 
 
 # ==========================================
-# /START COMMAND
+# /START — PRIVATE INBOX ONLY
 # ==========================================
 
-@bot.message_handler(commands=["start"])
+@bot.message_handler(
+    commands=["start"],
+    chat_types=["private"]
+)
 def start_command(message):
     first_name = escape_html(
         message.from_user.first_name or "Friend"
@@ -310,10 +319,14 @@ def start_command(message):
 
 
 # ==========================================
-# /HELP COMMAND
+# /HELP — PRIVATE INBOX ONLY
+# OWNER BUTTON ONLY HERE
 # ==========================================
 
-@bot.message_handler(commands=["help"])
+@bot.message_handler(
+    commands=["help"],
+    chat_types=["private"]
+)
 def help_command(message):
     text = (
         "📌 <b>𝗛𝗢𝗪 𝗧𝗢 𝗨𝗦𝗘</b>\n"
@@ -341,10 +354,13 @@ def help_command(message):
 
 
 # ==========================================
-# /FUTURES COMMAND
+# /FUTURES — PRIVATE INBOX ONLY
 # ==========================================
 
-@bot.message_handler(commands=["futures"])
+@bot.message_handler(
+    commands=["futures"],
+    chat_types=["private"]
+)
 def futures_command(message):
     text = (
         "✨ <b>𝗕𝗢𝗧 𝗙𝗘𝗔𝗧𝗨𝗥𝗘𝗦</b>\n"
@@ -366,10 +382,13 @@ def futures_command(message):
 
 
 # ==========================================
-# /ID COMMAND
+# /ID — PRIVATE INBOX ONLY
 # ==========================================
 
-@bot.message_handler(commands=["id"])
+@bot.message_handler(
+    commands=["id"],
+    chat_types=["private"]
+)
 def id_command(message):
     bot.reply_to(
         message,
@@ -404,7 +423,6 @@ def unmute_button_callback(call):
         chat_id = int(parts[1])
         target_user_id = int(parts[2])
 
-        # Only administrators of the original group can unmute.
         if not is_human_admin(chat_id, call.from_user.id):
             bot.answer_callback_query(
                 call.id,
@@ -413,7 +431,6 @@ def unmute_button_callback(call):
             )
             return
 
-        # Unmute the selected member.
         unmute_member(chat_id, target_user_id)
 
         bot.answer_callback_query(
@@ -421,7 +438,6 @@ def unmute_button_callback(call):
             "Member successfully unmuted."
         )
 
-        # Remove the button after use.
         try:
             bot.edit_message_reply_markup(
                 chat_id=call.message.chat.id,
@@ -433,7 +449,6 @@ def unmute_button_callback(call):
                 "Could not remove the unmute button."
             )
 
-        # Retrieve the target member's display name.
         try:
             target_member = bot.get_chat_member(
                 chat_id,
@@ -447,7 +462,6 @@ def unmute_button_callback(call):
         except Exception:
             target_name = "Unknown"
 
-        # Send the confirmation message.
         confirmation_text = (
             "✅ <b>MEMBER UNMUTED</b>\n\n"
             f"👮 <b>Administrator:</b> "
@@ -492,6 +506,7 @@ def unmute_button_callback(call):
 
 # ==========================================
 # ANTI-LINK MODERATION
+# GROUPS AND SUPERGROUPS ONLY
 # ==========================================
 
 @bot.message_handler(
@@ -512,15 +527,12 @@ def moderate_message(message):
     chat = message.chat
     user = message.from_user
 
-    # Only moderate groups and supergroups.
     if not is_group(chat):
         return
 
-    # Ignore bots and messages without a sender.
     if not user or user.is_bot:
         return
 
-    # Prevent duplicate processing.
     key = (chat.id, message.message_id)
 
     with processed_lock:
@@ -533,17 +545,14 @@ def moderate_message(message):
             processed_messages.clear()
             processed_messages.add(key)
 
-    # Do not moderate group administrators.
     if is_human_admin(chat.id, user.id):
         return
 
-    # Ignore messages without links.
     if not contains_link(message):
         return
 
     link = extract_link(message)
 
-    # Delete the original message.
     delete_success = False
 
     try:
@@ -558,7 +567,6 @@ def moderate_message(message):
             "Could not delete the offending message."
         )
 
-    # Mute only if the original message was deleted.
     mute_success = False
 
     if delete_success:
@@ -575,7 +583,6 @@ def moderate_message(message):
                 "Could not mute the member."
             )
 
-    # Send group warning.
     member_name = escape_html(
         get_display_name(user)
     )
@@ -606,7 +613,6 @@ def moderate_message(message):
             "Could not send the group warning."
         )
 
-    # Prepare the administrator report.
     username = (
         f"@{escape_html(user.username)}"
         if user.username
@@ -633,7 +639,6 @@ def moderate_message(message):
         "━━━━━━━━━━━━━━━━━━━━"
     )
 
-    # Add the unmute button only if mute succeeded.
     keyboard = None
 
     if mute_success:
@@ -646,7 +651,6 @@ def moderate_message(message):
             )
         )
 
-    # Send reports to human administrators.
     send_admin_report(
         chat.id,
         report,
@@ -681,4 +685,4 @@ if __name__ == "__main__":
         logger.exception(
             "The bot stopped unexpectedly."
         )
-        raiseraise
+        raise
