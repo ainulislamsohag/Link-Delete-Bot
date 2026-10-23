@@ -273,17 +273,17 @@ def mute_member(chat_id, user_id):
 
 # ================= ADMIN REPORT =================
 
+# ================= ADMIN REPORT =================
+
 def send_admin_report(chat_id, user, link, deleted, muted):
     try:
         chat = bot.get_chat(chat_id)
 
         group_title = html.escape(chat.title or "Unknown Group")
         safe_name = html.escape(get_display_name(user))
-
         safe_username = html.escape(
             f"@{user.username}" if user.username else "Not Set"
         )
-
         safe_link = html.escape(link)
 
         report = (
@@ -305,13 +305,22 @@ def send_admin_report(chat_id, user, link, deleted, muted):
         )
 
         bot.send_message(
-            OWNER_USERNAME,
-            report,
+            chat_id=OWNER_USERNAME,
+            text=report,
             reply_markup=get_unmute_keyboard(chat_id, user.id),
         )
 
+        print(
+            f"ADMIN REPORT SENT | Owner: @{OWNER_USERNAME} | "
+            f"Group: {chat_id} | User: {user.id}"
+        )
+
     except Exception as error:
-        print(f"ADMIN REPORT FAILED: {error}")
+        print(
+            f"ADMIN REPORT FAILED | "
+            f"Error Type: {type(error).__name__} | "
+            f"Details: {error}"
+        )
 
 
 # ================= START COMMAND =================
@@ -641,4 +650,4 @@ bot.infinity_polling(
     skip_pending=True,
     timeout=30,
     long_polling_timeout=30,
-)
+    )
