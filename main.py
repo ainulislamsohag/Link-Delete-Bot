@@ -1,7 +1,8 @@
-os
+import os
 import re
 import time
 import threading
+import html
 import telebot
 
 from telebot.types import (
@@ -22,8 +23,8 @@ BOT_NAME = "ANTI LINK BOT"
 OWNER_USERNAME = "ainulbhai"
 OWNER_URL = "https://t.me/ainulbhai"
 
-MUTE_DURATION = 2 * 60 * 60  # 2 hours
-REPORT_DELETE_DELAY = 180    # 3 minutes
+MUTE_DURATION = 2 * 60 * 60
+REPORT_DELETE_DELAY = 180
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
@@ -34,12 +35,10 @@ processed_lock = threading.Lock()
 
 LINK_PATTERN = re.compile(
     r"(?i)(https?://\S+|www\.\S+|"
-    r"t\.me/\S+|telegram\.me/\S+|"
-    r"telegram\.dog/\S+|"
-    r"\b[a-z0-9-]+\.(?:com|net|org|info|biz|"
-    r"xyz|site|online|me|io|co|app|dev|"
-    r"bd|in|us|uk|top|click|link|live|"
-    r"store|shop|tech|cloud|pro|gg)\b\S*)"
+    r"t\.me/\S+|telegram\.me/\S+|telegram\.dog/\S+|"
+    r"\b[a-z0-9-]+\.(?:com|net|org|info|biz|xyz|site|"
+    r"online|me|io|co|app|dev|bd|in|us|uk|top|click|"
+    r"link|live|store|shop|tech|cloud|pro|gg)\b\S*)"
 )
 
 # ================= KEYBOARDS =================
@@ -50,10 +49,7 @@ def get_main_keyboard():
         row_width=2
     )
 
-    keyboard.row(
-        KeyboardButton("➕ Add Bot in group➕")
-    )
-
+    keyboard.row(KeyboardButton("➕ Add Bot in group➕"))
     keyboard.row(
         KeyboardButton("❓ HOW TO USE ❓"),
         KeyboardButton("📞 Support")
@@ -113,18 +109,10 @@ def get_display_name(user):
     return name
 
 
-def is_group(message):
-    return message.chat.type in ("group", "supergroup")
-
-
 def is_human_admin(chat_id, user_id):
     try:
         member = bot.get_chat_member(chat_id, user_id)
-
-        return (
-            member.status in ("administrator", "creator")
-        )
-
+        return member.status in ("administrator", "creator")
     except Exception as error:
         print(f"Admin check error: {error}")
         return False
@@ -138,7 +126,7 @@ def contains_link(message):
 
     entities = (
         message.entities or []
-        if message.text
+        if message.text is not None
         else message.caption_entities or []
     )
 
@@ -147,11 +135,10 @@ def contains_link(message):
             return True
 
         if entity.type == "mention":
-            mentioned_text = text[
+            mention = text[
                 entity.offset:entity.offset + entity.length
             ]
-
-            if mentioned_text.startswith("@"):
+            if mention.startswith("@"):
                 return True
 
     return False
@@ -166,7 +153,7 @@ def extract_link(message):
 
     entities = (
         message.entities or []
-        if message.text
+        if message.text is not None
         else message.caption_entities or []
     )
 
@@ -183,7 +170,6 @@ def extract_link(message):
             mention = text[
                 entity.offset:entity.offset + entity.length
             ]
-
             if mention.startswith("@"):
                 return mention
 
@@ -197,7 +183,7 @@ def delete_message_later(chat_id, message_id, delay):
         try:
             bot.delete_message(chat_id, message_id)
         except Exception as error:
-            print(f"Scheduled message deletion failed: {error}")
+            print(f"Scheduled deletion failed: {error}")
 
     threading.Thread(target=task, daemon=True).start()
 
@@ -234,19 +220,23 @@ def mute_member(chat_id, user_id):
 def send_admin_report(chat_id, user, link, deleted, muted):
     try:
         chat = bot.get_chat(chat_id)
-        group_title = chat.title or "Unknown Group"
+        group_title = html.escape(chat.title or "Unknown Group")
+        safe_name = html.escape(get_display_name(user))
+        safe_username = html.escape(
+            f"@{user.username}" if user.username else "Not Set"
+        )
+        safe_link = html.escape(link)
 
         report = (
             "🚨 <b>ANTI LINK BOT REPORT</b> 🚨\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 <b>Name:</b> {get_display_name(user)}\n"
-            f"🧑‍💻 <b>Username:</b> "
-            f"@{user.username if user.username else 'Not Set'}\n"
+            f"👤 <b>Name:</b> {safe_name}\n"
+            f"🧑‍💻 <b>Username:</b> {safe_username}\n"
             f"🆔 <b>User ID:</b> <code>{user.id}</code>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"👥 <b>Group:</b> {group_title}\n"
             f"🆔 <b>Group ID:</b> <code>{chat_id}</code>\n"
-            f"🔗 <b>Detected Link:</b> <code>{link}</code>\n"
+            f"🔗 <b>Detected Link:</b> <code>{safe_link}</code>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🗑️ <b>Message Deleted:</b> "
             f"{'✅ YES' if deleted else '❌ NO'}\n"
@@ -275,7 +265,8 @@ def start_command(message):
         "🛡️ Your group protection assistant!\n\n"
         "🔗 Automatically detects and removes links "
         "sent by regular members.\n"
-        "🔇 Members who send links may be muted for 2 hours.\n\n"
+        "🔇 Members whose link messages are deleted "
+        "may be muted for 2 hours.\n\n"
         "👇 <b>Choose an option below:</b>"
     )
 
@@ -302,9 +293,8 @@ def add_bot_button(message):
         "1️⃣ Click the button below.\n"
         "2️⃣ Select your group.\n"
         "3️⃣ Add the bot as an administrator.\n"
-        "4️⃣ Enable the <b>Delete Messages</b> and "
-        "<b>Restrict Members</b> permissions.\n\n"
-        "<blockquote>"
+        "4️⃣ Enable Delete Messages and Restrict Members permissions."
+        "</blockquote>\n\n"
         "✅ Your group will then be protected by the bot."
     )
 
@@ -326,7 +316,7 @@ def add_bot_button(message):
 def how_to_use_button(message):
     text = (
         "❓ <b>HOW TO USE ANTI LINK BOT</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
         "<blockquote>"
         "➊ Add the bot to your group.\n"
         "➋ Promote the bot to administrator.\n"
@@ -336,15 +326,16 @@ def how_to_use_button(message):
         "➍ When a regular member sends a link, "
         "the bot will try to delete the message.\n"
         "➎ If the message is deleted successfully, "
-        "the member will be muted for 2 hours.\n"
-        "<blockquote>"
-        "📌 <b>Important:</b> Group administrators "
-        "are exempt from link moderation."
+        "the bot will try to mute the member for 2 hours."
+        "</blockquote>\n\n"
+        "📌 <b>Important:</b> Group administrators are "
+        "exempt from link moderation."
     )
 
     bot.send_message(
         message.chat.id,
-        text
+        text,
+        reply_markup=get_owner_keyboard()
     )
 
 
@@ -358,18 +349,18 @@ def how_to_use_button(message):
 )
 def support_button(message):
     support_text = (
-    "📞 <b>SUPPORT CENTER</b>\n"
-    "──────────────────────────\n\n"
-    "💠 <b>If You Face Any Problem:</b>\n\n"
-    "<blockquote>"
-    "🔴 Don’t worry! Our team is always here to assist you.\n"
-    "🟠 Please contact the owner or support team for instant help.\n"
-    "🟡 Make sure to describe your issue clearly so we can solve it fast."
-    "</blockquote>\n\n"
-    "✨ We’ll get back to you as soon as possible. "
-    "Thank you for your patience and trust!\n\n"
-    "<b>Contact The Owner Directly -</b>"
-)
+        "📞 <b>SUPPORT CENTER</b>\n"
+        "──────────────────────────\n\n"
+        "💠 <b>If You Face Any Problem:</b>\n\n"
+        "<blockquote>"
+        "🔴 Don’t worry! Our team is always here to assist you.\n"
+        "🟠 Please contact the owner or support team for instant help.\n"
+        "🟡 Make sure to describe your issue clearly so we can solve it fast."
+        "</blockquote>\n\n"
+        "✨ We’ll get back to you as soon as possible. "
+        "Thank you for your patience and trust!\n\n"
+        "<b>Contact The Owner Directly -</b>"
+    )
 
     bot.send_message(
         message.chat.id,
@@ -381,7 +372,7 @@ def support_button(message):
 # ================= UNMUTE CALLBACK =================
 
 @bot.callback_query_handler(
-    func=lambda call: call.data.startswith("unmute:")
+    func=lambda call: call.data and call.data.startswith("unmute:")
 )
 def unmute_callback(call):
     try:
@@ -429,7 +420,7 @@ def unmute_callback(call):
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"🆔 <b>User ID:</b> <code>{user_id}</code>\n"
             f"👮 <b>Action by:</b> "
-            f"{get_display_name(call.from_user)}\n"
+            f"{html.escape(get_display_name(call.from_user))}\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
 
@@ -442,11 +433,14 @@ def unmute_callback(call):
     except Exception as error:
         print(f"Unmute callback failed: {error}")
 
-        bot.answer_callback_query(
-            call.id,
-            "❌ Could not unmute this member.",
-            show_alert=True
-        )
+        try:
+            bot.answer_callback_query(
+                call.id,
+                "❌ Could not unmute this member.",
+                show_alert=True
+            )
+        except Exception:
+            pass
 
 
 # ================= ANTI-LINK MODERATION =================
@@ -466,10 +460,7 @@ def unmute_callback(call):
     func=lambda message: message.chat.type in ("group", "supergroup")
 )
 def anti_link_moderation(message):
-    if not message.from_user:
-        return
-
-    if message.from_user.is_bot:
+    if not message.from_user or message.from_user.is_bot:
         return
 
     if is_human_admin(message.chat.id, message.from_user.id):
@@ -511,7 +502,7 @@ def anti_link_moderation(message):
             "🚨 <b>LINK DETECTED!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"👤 <b>Member:</b> "
-            f"{get_display_name(message.from_user)}\n"
+            f"{html.escape(get_display_name(message.from_user))}\n"
             "🔗 Sending links is not allowed here.\n"
             f"🗑️ <b>Message Deleted:</b> "
             f"{'✅ YES' if deleted else '❌ NO'}\n"
