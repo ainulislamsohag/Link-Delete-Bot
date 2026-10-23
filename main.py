@@ -214,65 +214,59 @@ def delete_message_later(chat_id, message_id, delay):
 
 def mute_member(chat_id, user_id):
     try:
-        # Verify the bot's administrator status and permissions.
+        # Check bot permissions
         bot_id = bot.get_me().id
         bot_member = bot.get_chat_member(chat_id, bot_id)
 
         if bot_member.status != "administrator":
-            print("MUTE FAILED: Bot is not a group administrator.")
+            print("MUTE ERROR: Bot is not an administrator.")
             return False
 
-        if not getattr(
-            bot_member, "can_restrict_members", False
-        ):
-            print(
-                "MUTE FAILED: Enable 'Restrict Members' permission "
-                "for the bot in group administrator settings."
-            )
+        if not getattr(bot_member, "can_restrict_members", False):
+            print("MUTE ERROR: Restrict Members permission is disabled.")
             return False
 
-        # Never try to mute group administrators or the owner.
+        # Check target member
         target = bot.get_chat_member(chat_id, user_id)
 
         if target.status in ("administrator", "creator"):
-            print(
-                f"MUTE SKIPPED: User {user_id} is an administrator "
-                "or group owner."
-            )
+            print("MUTE ERROR: Cannot mute a group admin or owner.")
             return False
 
-        until_date = int(time.time()) + MUTE_DURATION
+        # Mute for 2 hours
+        until_date = int(time.time()) + 7200
 
-        bot.restrict_chat_member(
+        permissions = telebot.types.ChatPermissions(
+            can_send_messages=False,
+            can_send_audios=False,
+            can_send_documents=False,
+            can_send_photos=False,
+            can_send_videos=False,
+            can_send_video_notes=False,
+            can_send_voice_notes=False,
+            can_send_polls=False,
+            can_send_other_messages=False,
+            can_add_web_page_previews=False
+        )
+
+        result = bot.restrict_chat_member(
             chat_id=chat_id,
             user_id=user_id,
+            permissions=permissions,
             until_date=until_date,
-            permissions={
-                "can_send_messages": False,
-                "can_send_audios": False,
-                "can_send_documents": False,
-                "can_send_photos": False,
-                "can_send_videos": False,
-                "can_send_video_notes": False,
-                "can_send_voice_notes": False,
-                "can_send_polls": False,
-                "can_send_other_messages": False,
-                "can_add_web_page_previews": False,
-            },
-            use_independent_chat_permissions=True,
+            use_independent_chat_permissions=True
         )
 
         print(
-            f"MUTE SUCCESS | Chat: {chat_id} | "
-            f"User: {user_id} | Duration: 2 hours"
+            f"MUTE RESULT: {result} | "
+            f"Chat: {chat_id} | User: {user_id}"
         )
 
-        return True
+        return bool(result)
 
     except Exception as error:
         print(
-            f"MUTE FAILED | Chat: {chat_id} | "
-            f"User: {user_id} | Error: {error}"
+            f"MUTE ERROR: {type(error).__name__}: {error}"
         )
         return False
 
