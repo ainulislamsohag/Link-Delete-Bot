@@ -357,18 +357,18 @@ def how_to_use_button(message):
 )
 def support_button(message):
     support_text = (
-        "📞 <b>SUPPORT CENTER</b>\n"
-        "──────────────────────────\n\n"
-        "💠 <b>If You Face Any Problem:</b>\n\n"
-        "🔴 Don’t worry! Our team is always here to assist you.\n"
-        "🟠 Please contact the owner or support team "
-        "for instant help.\n"
-        "🟡 Make sure to describe your issue clearly "
-        "so we can solve it fast.\n\n"
-        "✨ We’ll get back to you as soon as possible. "
-        "Thank you for your patience and trust!\n\n"
-        "<b>Contact The Owner Directly -</b>"
-    )
+    "📞 <b>SUPPORT CENTER</b>\n"
+    "──────────────────────────\n\n"
+    "💠 <b>If You Face Any Problem:</b>\n\n"
+    "<blockquote>"
+    "🔴 Don’t worry! Our team is always here to assist you.\n"
+    "🟠 Please contact the owner or support team for instant help.\n"
+    "🟡 Make sure to describe your issue clearly so we can solve it fast."
+    "</blockquote>\n\n"
+    "✨ We’ll get back to you as soon as possible. "
+    "Thank you for your patience and trust!\n\n"
+    "<b>Contact The Owner Directly -</b>"
+)
 
     bot.send_message(
         message.chat.id,
