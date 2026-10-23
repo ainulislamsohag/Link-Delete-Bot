@@ -20,10 +20,13 @@ if not BOT_TOKEN:
         "ERROR: BOT_TOKEN environment variable is missing!"
     )
 
-bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
+BOT_NAME = "ANTI LINK BOT"
+OWNER_USERNAME = "ainulbhai"
 
 MUTE_DURATION = 2 * 60 * 60
 REPORT_DELETE_DELAY = 180
+
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,6 +70,17 @@ def is_human_admin(chat_id, user_id):
             exc
         )
         return False
+
+
+def owner_keyboard():
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(
+            "👑 OWNER",
+            url=f"https://t.me/{OWNER_USERNAME}"
+        )
+    )
+    return keyboard
 
 
 # ==========================================
@@ -183,7 +197,7 @@ def delete_message_later(chat_id, message_id, delay):
 
 
 # ==========================================
-# MUTE AND UNMUTE FUNCTIONS
+# MUTE AND UNMUTE
 # ==========================================
 
 def mute_member(chat_id, user_id, until_date):
@@ -232,6 +246,7 @@ def unmute_member(chat_id, user_id):
 
 # ==========================================
 # ADMIN REPORTS
+# Private reports are not auto-deleted.
 # ==========================================
 
 def send_admin_report(chat_id, report_text, reply_markup=None):
@@ -272,22 +287,84 @@ def send_admin_report(chat_id, report_text, reply_markup=None):
 
 @bot.message_handler(commands=["start"])
 def start_command(message):
-    user = message.from_user
-
-    text = (
-        "🛡️ <b>ANTI-LINK BOT</b>\n\n"
-        "I help protect groups by detecting links, "
-        "deleting prohibited messages, and muting members.\n\n"
-        "➤ Add me to your group.\n"
-        "➤ Grant me Delete Messages and Restrict Members permissions.\n"
-        "➤ Group administrators must send me /start privately "
-        "to receive security reports.\n\n"
-        f"👤 <b>Name:</b> "
-        f"{escape_html(get_display_name(user))}\n"
-        f"🆔 <b>User ID:</b> <code>{user.id}</code>"
+    first_name = escape_html(
+        message.from_user.first_name or "Friend"
     )
 
-    bot.reply_to(message, text)
+    text = (
+        "🛡️ <b>𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 𝗔𝗡𝗧𝗜 𝗟𝗜𝗡𝗞 𝗕𝗢𝗧</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"👋 Hello, {first_name}!\n"
+        f"💎 Welcome to {escape_html(BOT_NAME)}.\n\n"
+        "🤖 <b>YOUR GROUP, YOUR RULES!</b> 🛡️\n"
+        "🔰 Keep your Telegram group clean, safe & "
+        "spam-free with our smart protection system.\n"
+        "━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=owner_keyboard(),
+        disable_web_page_preview=True
+    )
+
+
+# ==========================================
+# /HELP COMMAND
+# ==========================================
+
+@bot.message_handler(commands=["help"])
+def help_command(message):
+    text = (
+        "📌 <b>𝗛𝗢𝗪 𝗧𝗢 𝗨𝗦𝗘</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "➊ Add the bot to your group.\n"
+        "➋ Promote the bot to Administrator.\n"
+        "➌ Give it permission to Delete Messages.\n"
+        "➍ Give it permission to Restrict Members.\n"
+        "➎ Enjoy automatic link protection! 🚀\n\n"
+        "⚙️ <b>Need Help?</b>\n"
+        "Add the bot to your group and configure "
+        "its settings to get started.\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "👑 Powered by AB ORGANIZATION\n"
+        "🛡️ Your Group's Security Is Our Priority!\n"
+        "━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=owner_keyboard(),
+        disable_web_page_preview=True
+    )
+
+
+# ==========================================
+# /FUTURES COMMAND
+# ==========================================
+
+@bot.message_handler(commands=["futures"])
+def futures_command(message):
+    text = (
+        "✨ <b>𝗕𝗢𝗧 𝗙𝗘𝗔𝗧𝗨𝗥𝗘𝗦</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔗 ➜ Automatically Detect Links\n"
+        "🚫 ➜ Delete Unauthorized Links\n"
+        "🛡️ ➜ Protect Your Group from Spam\n"
+        "⚡ ➜ Fast & Automatic Moderation\n"
+        "👮 ➜ Admin-Friendly Management\n"
+        "🔒 ➜ Keep Your Community Safe\n"
+        "━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    bot.send_message(
+        message.chat.id,
+        text,
+        reply_markup=owner_keyboard(),
+        disable_web_page_preview=True
+    )
 
 
 # ==========================================
@@ -358,7 +435,7 @@ def unmute_button_callback(call):
                 "Could not remove the unmute button."
             )
 
-        # Retrieve the target member's current display name.
+        # Retrieve the target member's display name.
         try:
             target_member = bot.get_chat_member(
                 chat_id,
@@ -372,7 +449,7 @@ def unmute_button_callback(call):
         except Exception:
             target_name = "Unknown"
 
-        # Send the requested confirmation message.
+        # Send the confirmation message.
         confirmation_text = (
             "✅ <b>MEMBER UNMUTED</b>\n\n"
             f"👮 <b>Administrator:</b> "
@@ -384,11 +461,10 @@ def unmute_button_callback(call):
 
         try:
             confirmation = bot.send_message(
-                chat_id=call.message.chat.id,
-                text=confirmation_text
+                call.message.chat.id,
+                confirmation_text
             )
 
-            # Delete confirmation after three minutes.
             delete_message_later(
                 confirmation.chat.id,
                 confirmation.message_id,
@@ -469,7 +545,7 @@ def moderate_message(message):
 
     link = extract_link(message)
 
-    # Attempt to delete the original message.
+    # Delete the original message.
     delete_success = False
 
     try:
@@ -484,7 +560,7 @@ def moderate_message(message):
             "Could not delete the offending message."
         )
 
-    # Mute the member only if deletion succeeded.
+    # Mute only if the original message was deleted.
     mute_success = False
 
     if delete_success:
@@ -532,7 +608,7 @@ def moderate_message(message):
             "Could not send the group warning."
         )
 
-    # Prepare administrator report.
+    # Prepare the administrator report.
     username = (
         f"@{escape_html(user.username)}"
         if user.username
@@ -559,7 +635,7 @@ def moderate_message(message):
         "━━━━━━━━━━━━━━━━━━━━"
     )
 
-    # Add an unmute button if the member was muted.
+    # Add the unmute button only if mute succeeded.
     keyboard = None
 
     if mute_success:
@@ -568,13 +644,11 @@ def moderate_message(message):
         keyboard.add(
             InlineKeyboardButton(
                 "🔓 UNMUTE MEMBER",
-                callback_data=(
-                    f"unmute:{chat.id}:{user.id}"
-                )
+                callback_data=f"unmute:{chat.id}:{user.id}"
             )
         )
 
-    # Send private reports to human administrators.
+    # Send reports to human administrators.
     send_admin_report(
         chat.id,
         report,
